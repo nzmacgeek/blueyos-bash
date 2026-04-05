@@ -1,0 +1,11 @@
+#!/bin/sh
+# Post-installation script for bash
+# Called after files are placed.
+set -e
+
+# Register /bin/bash in /etc/shells if the file exists.
+if [ -f /etc/shells ]; then
+    grep -qxF '/bin/bash' /etc/shells || echo '/bin/bash' >> /etc/shells
+fi
+
+exit 0

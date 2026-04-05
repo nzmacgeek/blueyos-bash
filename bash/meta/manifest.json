@@ -1,0 +1,15 @@
+{
+  "name": "bash",
+  "version": "5.2.21",
+  "arch": "i386",
+  "description": "GNU Bash shell (v5) for BlueyOS — the default interactive shell and /bin/bash",
+  "depends": ["ncurses>=6.4", "readline>=8.2"],
+  "recommends": [],
+  "conflicts": [],
+  "provides": ["sh"],
+  "maintainer": "BlueyOS Maintainers <maintainers@blueyos.example>",
+  "homepage": "https://www.gnu.org/software/bash/",
+  "core": true,
+  "files": [],
+  "scripts": {}
+}

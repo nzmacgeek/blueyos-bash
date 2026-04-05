@@ -1,0 +1,9 @@
+#!/bin/sh
+# Post-installation script for ncurses
+# Called after files are placed.
+set -e
+
+# Do not attempt to rebuild terminfo here: `tic` expects terminfo
+# source files, not compiled entries under /usr/share/terminfo.
+
+exit 0

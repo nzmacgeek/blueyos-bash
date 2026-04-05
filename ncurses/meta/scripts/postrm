@@ -1,0 +1,6 @@
+#!/bin/sh
+# Post-removal script for ncurses
+# Called after files are removed.
+set -e
+
+exit 0
