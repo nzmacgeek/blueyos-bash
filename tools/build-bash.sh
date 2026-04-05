@@ -23,6 +23,8 @@ REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 BASH_VERSION="${BASH_VERSION:-5.2}"
 BASH_PATCH_LEVEL="${BASH_PATCH_LEVEL:-21}"
+# SHA256 of the official bash-5.2.tar.gz from https://ftp.gnu.org/gnu/bash/
+BASH_SHA256="${BASH_SHA256:-a139c166df7ff4471c5e0733051642ee5556bd7d7dcdcc0e9f80b22d6a7a3c5a}"
 MUSL_PREFIX="${MUSL_PREFIX:-${REPO_DIR}/build/musl}"
 BUILD_DIR="${BUILD_DIR:-${REPO_DIR}/build}"
 NCURSES_PREFIX="${NCURSES_PREFIX:-${BUILD_DIR}/ncurses-install}"
@@ -77,6 +79,14 @@ if [ ! -f "${READLINE_LIB}/libreadline.a" ]; then
   exit 1
 fi
 
+if [ ! -f "${NCURSES_LIB}/libncursesw.a" ]; then
+  echo ""
+  echo "  [BASH] ncurses wide-char build (libncursesw.a) not found under ${NCURSES_PREFIX}"
+  echo "         Run: make ncurses"
+  echo ""
+  exit 1
+fi
+
 # ---------------------------------------------------------------------------
 # Download base tarball
 # ---------------------------------------------------------------------------
@@ -91,6 +101,9 @@ if [ ! -f "${DOWNLOAD_DIR}/${TARBALL}" ]; then
   echo "[BASH] Downloading ${TARBALL_URL}..."
   curl -fSL --retry 3 -o "${DOWNLOAD_DIR}/${TARBALL}" "${TARBALL_URL}"
 fi
+
+echo "[BASH] Verifying SHA256 for ${TARBALL}..."
+echo "${BASH_SHA256}  ${DOWNLOAD_DIR}/${TARBALL}" | sha256sum -c -
 
 if [ ! -d "${SRC_DIR}" ]; then
   echo "[BASH] Extracting ${TARBALL}..."
@@ -127,7 +140,16 @@ BUILD_SUBDIR="${SRC_DIR}/build-blueyos"
 mkdir -p "${BUILD_SUBDIR}"
 cd "${BUILD_SUBDIR}"
 
-CC="${CC:-gcc}"
+# Prefer the musl-gcc wrapper installed by `make musl`; fall back to plain gcc.
+# CC may be set explicitly by the caller (e.g. from the Makefile) — respect that.
+MUSL_GCC="${MUSL_PREFIX}/bin/musl-gcc"
+if [ -z "${CC:-}" ]; then
+  if [ -x "${MUSL_GCC}" ]; then
+    CC="${MUSL_GCC}"
+  else
+    CC="gcc"
+  fi
+fi
 
 echo "[BASH] Configuring bash ${BASH_VERSION}.${BASH_PATCH_LEVEL} for i386/musl..."
 "${SRC_DIR}/configure" \
@@ -179,6 +201,9 @@ mkdir -p "${STAGE_DIR}/usr/share/man/man1"
 mkdir -p "${STAGE_DIR}/usr/share/doc/bash"
 
 install -m 0755 bash "${STAGE_DIR}/bin/bash"
+
+# Stage /bin/sh -> bash so the package's "provides": ["sh"] is accurate.
+ln -sfn bash "${STAGE_DIR}/bin/sh"
 
 # man page (if built)
 if [ -f doc/bash.1 ]; then

@@ -20,6 +20,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 NCURSES_VERSION="${NCURSES_VERSION:-6.5}"
+# SHA256 of the official ncurses-6.5.tar.gz from https://ftp.gnu.org/gnu/ncurses/
+NCURSES_SHA256="${NCURSES_SHA256:-136d91bc269a9a5785e5f9e980bc76ab57428f604ce3e5a5a90cebc767971cc6}"
 MUSL_PREFIX="${MUSL_PREFIX:-${REPO_DIR}/build/musl}"
 BUILD_DIR="${BUILD_DIR:-${REPO_DIR}/build}"
 INSTALL_PREFIX="${INSTALL_PREFIX:-${BUILD_DIR}/ncurses-install}"
@@ -71,6 +73,9 @@ if [ ! -f "${DOWNLOAD_DIR}/${TARBALL}" ]; then
   curl -fSL --retry 3 -o "${DOWNLOAD_DIR}/${TARBALL}" "${TARBALL_URL}"
 fi
 
+echo "[NCURSES] Verifying SHA256 for ${TARBALL}..."
+echo "${NCURSES_SHA256}  ${DOWNLOAD_DIR}/${TARBALL}" | sha256sum -c -
+
 if [ ! -d "${SRC_DIR}" ]; then
   echo "[NCURSES] Extracting ${TARBALL}..."
   tar -C "${BUILD_DIR}" -xzf "${DOWNLOAD_DIR}/${TARBALL}"
@@ -83,7 +88,16 @@ BUILD_SUBDIR="${SRC_DIR}/build-blueyos"
 mkdir -p "${BUILD_SUBDIR}"
 cd "${BUILD_SUBDIR}"
 
-CC="${CC:-gcc}"
+# Prefer the musl-gcc wrapper installed by `make musl`; fall back to plain gcc.
+# CC may be set explicitly by the caller (e.g. from the Makefile) — respect that.
+MUSL_GCC="${MUSL_PREFIX}/bin/musl-gcc"
+if [ -z "${CC:-}" ]; then
+  if [ -x "${MUSL_GCC}" ]; then
+    CC="${MUSL_GCC}"
+  else
+    CC="gcc"
+  fi
+fi
 
 echo "[NCURSES] Configuring ncurses ${NCURSES_VERSION} for i386/musl..."
 "${SRC_DIR}/configure" \
@@ -127,12 +141,14 @@ mkdir -p "${STAGING_PREFIX}"
 make install prefix="${STAGING_PREFIX}"
 
 # Provide conventional symlinks: libncurses → libncursesw (wide-char is default)
-for f in "${STAGING_PREFIX}/lib"/libncursesw*; do
-  base="${f##*/}"
-  compat="${base/ncursesw/ncurses}"
-  target="${STAGING_PREFIX}/lib/${compat}"
-  [ -e "${target}" ] || ln -sfn "${base}" "${target}"
-done
+if compgen -G "${STAGING_PREFIX}/lib/libncursesw*" > /dev/null 2>&1; then
+  for f in "${STAGING_PREFIX}/lib"/libncursesw*; do
+    base="${f##*/}"
+    compat="${base/ncursesw/ncurses}"
+    target="${STAGING_PREFIX}/lib/${compat}"
+    [ -e "${target}" ] || ln -sfn "${base}" "${target}"
+  done
+fi
 
 # Provide curses.h → ncurses/curses.h compatibility header
 if [ ! -f "${STAGING_PREFIX}/include/curses.h" ] && \

@@ -8,7 +8,8 @@
 #   PREFIX        - install prefix (default: build/musl); also honoured from env
 #   TARGET        - musl target triplet (default: i386-linux-musl)
 #   MUSL_REPO     - GitHub repo to clone (default: nzmacgeek/musl-blueyos)
-#   MUSL_REF      - branch/tag to check out (default: remote HEAD)
+#   MUSL_REF      - branch/tag/commit to check out (default: main)
+#                   Override with --ref=<sha> for fully reproducible builds.
 #
 # After this script completes, build the packages with:
 #   make MUSL_PREFIX=<PREFIX>
@@ -22,7 +23,7 @@ REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PREFIX="${PREFIX:-${REPO_DIR}/build/musl}"
 TARGET="${TARGET:-i386-linux-musl}"
 MUSL_REPO="${MUSL_REPO:-nzmacgeek/musl-blueyos}"
-MUSL_REF="${MUSL_REF:-}"
+MUSL_REF="${MUSL_REF:-main}"  # default to 'main'; use --ref=<sha> for reproducibility
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -54,14 +55,15 @@ echo "  prefix : ${PREFIX}"
 echo "  workdir: ${BUILD_TMP}"
 echo ""
 
-echo "Cloning ${MUSL_CLONE_URL}..."
-if [ -n "${MUSL_REF}" ]; then
-  git clone --depth=1 --branch "${MUSL_REF}" "${MUSL_CLONE_URL}" "${MUSL_SRC_DIR}"
-else
-  git clone --depth=1 "${MUSL_CLONE_URL}" "${MUSL_SRC_DIR}"
-fi
+echo "Cloning ${MUSL_CLONE_URL} (ref: ${MUSL_REF})..."
+git clone --depth=1 --branch "${MUSL_REF}" "${MUSL_CLONE_URL}" "${MUSL_SRC_DIR}"
 
 cd "${MUSL_SRC_DIR}"
+
+# Record the exact commit that was built for traceability.
+MUSL_COMMIT="$(git rev-parse HEAD)"
+echo "  musl-blueyos commit: ${MUSL_COMMIT}"
+echo ""
 
 CC="${CC:-gcc}"
 
@@ -85,6 +87,7 @@ make install
 
 echo ""
 echo "  musl-blueyos installed to: ${PREFIX}"
+echo "  commit: ${MUSL_COMMIT}"
 echo ""
 echo "  Build the packages now with:"
 echo "    make MUSL_PREFIX=${PREFIX}"

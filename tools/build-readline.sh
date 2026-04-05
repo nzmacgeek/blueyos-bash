@@ -22,6 +22,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 READLINE_VERSION="${READLINE_VERSION:-8.2}"
+# SHA256 of the official readline-8.2.tar.gz from https://ftp.gnu.org/gnu/readline/
+READLINE_SHA256="${READLINE_SHA256:-3feb7171f16a84ee82ca18a36d7b9be109a52c04f492a053331d7d1095007c35}"
 MUSL_PREFIX="${MUSL_PREFIX:-${REPO_DIR}/build/musl}"
 BUILD_DIR="${BUILD_DIR:-${REPO_DIR}/build}"
 NCURSES_PREFIX="${NCURSES_PREFIX:-${BUILD_DIR}/ncurses-install}"
@@ -62,9 +64,9 @@ if [ ! -d "${MUSL_INCLUDE}" ] || [ ! -f "${MUSL_LIB}/libc.a" ]; then
   exit 1
 fi
 
-if [ ! -f "${NCURSES_LIB}/libncursesw.a" ] && [ ! -f "${NCURSES_LIB}/libncurses.a" ]; then
+if [ ! -f "${NCURSES_LIB}/libncursesw.a" ]; then
   echo ""
-  echo "  [READLINE] ncurses build not found under ${NCURSES_PREFIX}"
+  echo "  [READLINE] ncurses wide-char build (libncursesw.a) not found under ${NCURSES_PREFIX}"
   echo "             Run: make ncurses"
   echo ""
   exit 1
@@ -85,6 +87,9 @@ if [ ! -f "${DOWNLOAD_DIR}/${TARBALL}" ]; then
   curl -fSL --retry 3 -o "${DOWNLOAD_DIR}/${TARBALL}" "${TARBALL_URL}"
 fi
 
+echo "[READLINE] Verifying SHA256 for ${TARBALL}..."
+echo "${READLINE_SHA256}  ${DOWNLOAD_DIR}/${TARBALL}" | sha256sum -c -
+
 if [ ! -d "${SRC_DIR}" ]; then
   echo "[READLINE] Extracting ${TARBALL}..."
   tar -C "${BUILD_DIR}" -xzf "${DOWNLOAD_DIR}/${TARBALL}"
@@ -97,7 +102,16 @@ BUILD_SUBDIR="${SRC_DIR}/build-blueyos"
 mkdir -p "${BUILD_SUBDIR}"
 cd "${BUILD_SUBDIR}"
 
-CC="${CC:-gcc}"
+# Prefer the musl-gcc wrapper installed by `make musl`; fall back to plain gcc.
+# CC may be set explicitly by the caller (e.g. from the Makefile) — respect that.
+MUSL_GCC="${MUSL_PREFIX}/bin/musl-gcc"
+if [ -z "${CC:-}" ]; then
+  if [ -x "${MUSL_GCC}" ]; then
+    CC="${MUSL_GCC}"
+  else
+    CC="gcc"
+  fi
+fi
 
 echo "[READLINE] Configuring readline ${READLINE_VERSION} for i386/musl..."
 "${SRC_DIR}/configure" \

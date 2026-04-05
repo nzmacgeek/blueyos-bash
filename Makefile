@@ -56,6 +56,17 @@ endif
 NCURSES_PREFIX  := $(BUILD_DIR)/ncurses-install
 READLINE_PREFIX := $(BUILD_DIR)/readline-install
 
+# Compiler: prefer the musl-gcc wrapper produced by `make musl`.
+# This avoids accidentally mixing glibc start files with musl headers.
+# Override on the command line if you have a dedicated cross-compiler:
+#   make CC=i386-linux-musl-gcc
+MUSL_GCC := $(MUSL_PREFIX)/bin/musl-gcc
+ifeq ($(shell [ -x $(MUSL_GCC) ] && echo yes),yes)
+  CC ?= $(MUSL_GCC)
+else
+  CC ?= gcc
+endif
+
 # ---------------------------------------------------------------------------
 # Phony targets
 # ---------------------------------------------------------------------------
@@ -99,6 +110,7 @@ ncurses: musl-check
 	  BUILD_DIR=$(BUILD_DIR) \
 	  INSTALL_PREFIX=$(NCURSES_PREFIX) \
 	  STAGE_DIR=$(CURDIR)/ncurses/payload \
+	  CC=$(CC) \
 	  bash tools/build-ncurses.sh
 	@echo ""
 	@echo "  [OK]  ncurses $(NCURSES_VERSION) — payload staged in ncurses/payload/"
@@ -113,6 +125,7 @@ readline: ncurses
 	  NCURSES_PREFIX=$(NCURSES_PREFIX) \
 	  INSTALL_PREFIX=$(READLINE_PREFIX) \
 	  STAGE_DIR=$(CURDIR)/readline/payload \
+	  CC=$(CC) \
 	  bash tools/build-readline.sh
 	@echo ""
 	@echo "  [OK]  readline $(READLINE_VERSION) — payload staged in readline/payload/"
@@ -128,6 +141,7 @@ bash: readline
 	  NCURSES_PREFIX=$(NCURSES_PREFIX) \
 	  READLINE_PREFIX=$(READLINE_PREFIX) \
 	  STAGE_DIR=$(CURDIR)/bash/payload \
+	  CC=$(CC) \
 	  bash tools/build-bash.sh
 	@echo ""
 	@echo "  [OK]  bash $(BASH_VERSION).$(BASH_PATCH_LEVEL) — payload staged in bash/payload/"
@@ -176,6 +190,7 @@ help:
 	@echo ""
 	@echo "Variables:"
 	@echo "  MUSL_PREFIX=...        musl sysroot  (default: $(MUSL_PREFIX))"
+	@echo "  CC=...                 C compiler    (default: $(CC))"
 	@echo "  BUILD_DIR=...          output dir    (default: build)"
 	@echo "  NCURSES_VERSION=...    (default: $(NCURSES_VERSION))"
 	@echo "  READLINE_VERSION=...   (default: $(READLINE_VERSION))"

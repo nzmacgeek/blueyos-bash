@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # Post-removal script for bash
 # Called after files are removed.
 set -e
