@@ -1,0 +1,19 @@
+# Build artefacts and downloaded sources
+build/
+
+# Assembled .dpk packages (produced by 'make dpk')
+*.dpk
+
+# Staged payload files (populated by build scripts; checked in only as .gitkeep)
+ncurses/payload/*
+readline/payload/*
+bash/payload/*
+!ncurses/payload/.gitkeep
+!readline/payload/.gitkeep
+!bash/payload/.gitkeep
+
+# Editor / OS noise
+.DS_Store
+*.swp
+*.swo
+*~

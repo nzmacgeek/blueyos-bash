@@ -1,0 +1,14 @@
+#!/bin/bash
+# Post-removal script for bash
+# Called after files are removed.
+set -e
+
+# Remove /bin/bash from /etc/shells if present.
+if [ -f /etc/shells ]; then
+    SHELLS_TMP="$(mktemp /etc/shells.XXXXXX)"
+    trap 'rm -f "${SHELLS_TMP}"' EXIT
+    grep -vxF '/bin/bash' /etc/shells > "${SHELLS_TMP}" || true
+    mv "${SHELLS_TMP}" /etc/shells
+fi
+
+exit 0

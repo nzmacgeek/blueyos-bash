@@ -1,0 +1,11 @@
+#!/bin/bash
+# Post-installation script for ncurses
+# Called after files are placed.
+set -e
+
+# Rebuild the terminfo database cache if tic is present.
+if command -v tic >/dev/null 2>&1; then
+    find /usr/share/terminfo -name 'xterm*' -exec tic -x {} \; 2>/dev/null || true
+fi
+
+exit 0

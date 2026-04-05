@@ -1,0 +1,15 @@
+{
+  "name": "ncurses",
+  "version": "6.5",
+  "arch": "i386",
+  "description": "Terminal handling library for BlueyOS (ncurses 6.5, wide-character enabled)",
+  "depends": [],
+  "recommends": [],
+  "conflicts": [],
+  "provides": [],
+  "maintainer": "BlueyOS Maintainers <maintainers@blueyos.example>",
+  "homepage": "https://invisible-island.net/ncurses/",
+  "core": true,
+  "files": [],
+  "scripts": {}
+}
