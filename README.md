@@ -48,16 +48,22 @@ make musl
 # 2. Build all three packages and stage their payloads
 make
 
-# 3. Assemble .dpk archives (requires dpkbuild from nzmacgeek/dimsim)
+# 3. Optionally install the staged payloads into a sysroot
+make install SYSROOT=/mnt/blueyos
+
+# 4. Assemble .dpk archives (requires dpkbuild from nzmacgeek/dimsim)
 make dpk
 ```
 
 ### Quick start on a BlueyOS build host
 
-If a sysroot is already installed at `/opt/blueyos-sysroot`:
+If a BlueyOS sysroot is already installed at `/opt/blueyos-sysroot`, the build now
+auto-detects the compiler/sysroot prefix under `/opt/blueyos-sysroot/usr` when
+needed:
 
 ```bash
-make        # MUSL_PREFIX auto-resolves to /opt/blueyos-sysroot
+make        # MUSL_PREFIX auto-resolves to /opt/blueyos-sysroot/usr on BlueyOS hosts
+make install # installs payloads into /opt/blueyos-sysroot by default
 make dpk
 ```
 
@@ -67,18 +73,38 @@ make dpk
 make ncurses    # downloads ncurses 6.5, builds, stages payload
 make readline   # depends on ncurses
 make bash       # depends on ncurses + readline
+make install    # build everything, then copy payloads into the target sysroot
 ```
 
 ### Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MUSL_PREFIX` | `/opt/blueyos-sysroot` or `build/musl` | musl sysroot path |
+| `MUSL_PREFIX` | auto-detected (`/opt/blueyos-sysroot/usr` or `build/musl`) | musl sysroot/compiler prefix |
+| `SYSROOT` | auto-detected (`/opt/blueyos-sysroot` when present) | target root for `make install` |
+| `DESTDIR` | unset | alias for `SYSROOT` during `make install` |
 | `BUILD_DIR` | `build` | output directory |
 | `NCURSES_VERSION` | `6.5` | ncurses source version |
 | `READLINE_VERSION` | `8.2` | readline source version |
 | `BASH_VERSION` | `5.2` | bash base tarball version |
 | `BASH_PATCH_LEVEL` | `21` | number of GNU official bash patches to apply |
+
+### Installing into a sysroot
+
+`make install` copies the already staged payload trees from `ncurses/payload/`,
+`readline/payload/`, and `bash/payload/` into a target root, preserving file
+permissions and symlinks.
+
+```bash
+make install SYSROOT=/mnt/blueyos
+
+# equivalent
+make install DESTDIR=/mnt/blueyos
+```
+
+If `SYSROOT`/`DESTDIR` is not provided, the Makefile defaults to
+`/opt/blueyos-sysroot` when that directory exists. If your compiler prefix is
+`/some/path/usr`, `make install` can also derive the target root as `/some/path`.
 
 ## Offline / sysroot install
 

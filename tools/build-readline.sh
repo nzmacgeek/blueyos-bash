@@ -30,6 +30,35 @@ NCURSES_PREFIX="${NCURSES_PREFIX:-${BUILD_DIR}/ncurses-install}"
 INSTALL_PREFIX="${INSTALL_PREFIX:-${BUILD_DIR}/readline-install}"
 STAGE_DIR="${STAGE_DIR:-${REPO_DIR}/readline/payload}"
 
+abspath() {
+  case "$1" in
+    /*) printf '%s\n' "$1" ;;
+    *) printf '%s/%s\n' "${REPO_DIR}" "$1" ;;
+  esac
+}
+
+ensure_configure_script() {
+  local src_dir configure_path
+  src_dir="$1"
+  configure_path="${src_dir}/configure"
+
+  if [ -x "${configure_path}" ]; then
+    return 0
+  fi
+
+  if command -v autoreconf >/dev/null 2>&1 && \
+     { [ -f "${src_dir}/configure.ac" ] || [ -f "${src_dir}/configure.in" ]; }; then
+    echo "[READLINE] configure missing; regenerating with autoreconf..."
+    (cd "${src_dir}" && autoreconf -fi)
+  fi
+
+  if [ ! -x "${configure_path}" ]; then
+    echo "[READLINE] Missing ${configure_path}" >&2
+    echo "           Remove ${src_dir} and retry. If this is a checkout, install autotools first." >&2
+    exit 1
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
@@ -47,6 +76,12 @@ while [[ $# -gt 0 ]]; do
     *) echo "Unknown argument: $1" >&2; exit 1 ;;
   esac
 done
+
+BUILD_DIR="$(abspath "${BUILD_DIR}")"
+NCURSES_PREFIX="$(abspath "${NCURSES_PREFIX}")"
+INSTALL_PREFIX="$(abspath "${INSTALL_PREFIX}")"
+STAGE_DIR="$(abspath "${STAGE_DIR}")"
+MUSL_PREFIX="$(BLUEYOS_SYSROOT="${BLUEYOS_SYSROOT:-/opt/blueyos-sysroot}" BUILD_DIR="${BUILD_DIR}" bash "${SCRIPT_DIR}/resolve-musl-prefix.sh" "${MUSL_PREFIX}")"
 
 MUSL_INCLUDE="${MUSL_PREFIX}/include"
 MUSL_LIB="${MUSL_PREFIX}/lib"
@@ -95,6 +130,8 @@ if [ ! -d "${SRC_DIR}" ]; then
   tar -C "${BUILD_DIR}" -xzf "${DOWNLOAD_DIR}/${TARBALL}"
 fi
 
+ensure_configure_script "${SRC_DIR}"
+
 # ---------------------------------------------------------------------------
 # Configure
 # ---------------------------------------------------------------------------
@@ -113,6 +150,16 @@ if [ -z "${CC:-}" ]; then
   fi
 fi
 
+if [ "${CC##*/}" = "musl-gcc" ] && [ -z "${REALGCC:-}" ]; then
+  REALGCC="gcc"
+  export REALGCC
+fi
+
+EXTRA_LDFLAGS=""
+if [ "${CC##*/}" = "musl-gcc" ]; then
+  EXTRA_LDFLAGS=" -Wl,-m,elf_i386"
+fi
+
 echo "[READLINE] Configuring readline ${READLINE_VERSION} for i386/musl..."
 "${SRC_DIR}/configure" \
   --prefix="${INSTALL_PREFIX}" \
@@ -122,7 +169,7 @@ echo "[READLINE] Configuring readline ${READLINE_VERSION} for i386/musl..."
   --disable-install-examples \
   CC="${CC}" \
   CFLAGS="-m32 -O2 -fno-stack-protector -isystem ${MUSL_INCLUDE} -I${NCURSES_INCLUDE}" \
-  LDFLAGS="-m32 -static -L${MUSL_LIB} -L${NCURSES_LIB}" \
+  LDFLAGS="-m32 -static -L${MUSL_LIB} -L${NCURSES_LIB}${EXTRA_LDFLAGS}" \
   LIBS="-lncursesw"
 
 # ---------------------------------------------------------------------------

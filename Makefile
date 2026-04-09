@@ -3,6 +3,7 @@
 #
 # Targets:
 #   make              - build all packages (ncurses → readline → bash)
+#   make install      - build and install staged payloads into a target sysroot
 #   make ncurses      - build ncurses 6.5 and stage its dimsim payload
 #   make readline     - build readline 8.2 and stage its dimsim payload
 #   make bash         - build bash 5.2.21 and stage its dimsim payload
@@ -15,6 +16,9 @@
 #   MUSL_PREFIX       - path to a musl-blueyos sysroot.
 #                       Defaults to /opt/blueyos-sysroot when present,
 #                       otherwise falls back to build/musl.
+#   SYSROOT / DESTDIR - target root used by `make install`.
+#                       Defaults to /opt/blueyos-sysroot when present,
+#                       otherwise can be derived from MUSL_PREFIX=/path/usr.
 #   BUILD_DIR         - output directory (default: build)
 #   NCURSES_VERSION   - ncurses version to download  (default: 6.5)
 #   READLINE_VERSION  - readline version to download (default: 8.2)
@@ -44,17 +48,18 @@ BASH_PATCH_LEVEL ?= 21
 # Directories and sysroot
 # ---------------------------------------------------------------------------
 BUILD_DIR ?= build
+ABS_BUILD_DIR := $(if $(filter /%,$(BUILD_DIR)),$(BUILD_DIR),$(CURDIR)/$(BUILD_DIR))
 
 BLUEYOS_SYSROOT ?= /opt/blueyos-sysroot
-ifeq ($(shell [ -d $(BLUEYOS_SYSROOT) ] && echo yes),yes)
-  MUSL_PREFIX ?= $(BLUEYOS_SYSROOT)
+ifeq ($(origin MUSL_PREFIX),undefined)
+  MUSL_PREFIX := $(shell BLUEYOS_SYSROOT="$(BLUEYOS_SYSROOT)" BUILD_DIR="$(ABS_BUILD_DIR)" bash tools/resolve-musl-prefix.sh)
 else
-  MUSL_PREFIX ?= $(BUILD_DIR)/musl
+  MUSL_PREFIX := $(shell BLUEYOS_SYSROOT="$(BLUEYOS_SYSROOT)" BUILD_DIR="$(ABS_BUILD_DIR)" bash tools/resolve-musl-prefix.sh "$(MUSL_PREFIX)")
 endif
 
 # Build-time install prefixes used as inputs for the next package in the chain.
-NCURSES_PREFIX  := $(BUILD_DIR)/ncurses-install
-READLINE_PREFIX := $(BUILD_DIR)/readline-install
+NCURSES_PREFIX  := $(ABS_BUILD_DIR)/ncurses-install
+READLINE_PREFIX := $(ABS_BUILD_DIR)/readline-install
 
 # Compiler: prefer the musl-gcc wrapper produced by `make musl`.
 # This avoids accidentally mixing glibc start files with musl headers.
@@ -62,15 +67,23 @@ READLINE_PREFIX := $(BUILD_DIR)/readline-install
 #   make CC=i386-linux-musl-gcc
 MUSL_GCC := $(MUSL_PREFIX)/bin/musl-gcc
 ifeq ($(shell [ -x $(MUSL_GCC) ] && echo yes),yes)
-  CC ?= $(MUSL_GCC)
+  DEFAULT_CC := $(MUSL_GCC)
 else
-  CC ?= gcc
+  DEFAULT_CC := gcc
+endif
+ifeq ($(origin CC),default)
+  CC := $(DEFAULT_CC)
+else ifeq ($(origin CC),undefined)
+  CC := $(DEFAULT_CC)
 endif
 
 # ---------------------------------------------------------------------------
 # Phony targets
 # ---------------------------------------------------------------------------
-.PHONY: all ncurses readline bash dpk musl musl-check clean help
+INSTALL_ROOT_INPUT := $(strip $(if $(DESTDIR),$(DESTDIR),$(SYSROOT)))
+INSTALL_SYSROOT := $(shell BLUEYOS_SYSROOT="$(BLUEYOS_SYSROOT)" MUSL_PREFIX="$(MUSL_PREFIX)" bash tools/resolve-install-sysroot.sh "$(INSTALL_ROOT_INPUT)" 2>/dev/null)
+
+.PHONY: all install install-staged ncurses readline bash dpk musl musl-check clean help
 
 .DEFAULT_GOAL := all
 
@@ -78,6 +91,40 @@ endif
 # all — build the full chain
 # ---------------------------------------------------------------------------
 all: bash
+
+# ---------------------------------------------------------------------------
+# install — build and install payloads into a target sysroot
+# ---------------------------------------------------------------------------
+install: bash install-staged
+
+# ---------------------------------------------------------------------------
+# install-staged — copy already staged payloads into a target sysroot
+# ---------------------------------------------------------------------------
+define check_install_sysroot
+	@if [ -z "$(INSTALL_SYSROOT)" ]; then \
+		echo ""; \
+		echo "  [INSTALL] No target sysroot could be resolved."; \
+		echo "            Use: make install SYSROOT=/path/to/sysroot"; \
+		echo "            or:  make install DESTDIR=/path/to/sysroot"; \
+		echo ""; \
+		exit 1; \
+	fi
+	@if [ "$(INSTALL_SYSROOT)" = "/" ] || [ "$(INSTALL_SYSROOT)" = "." ]; then \
+		echo "  [INSTALL] Refusing to install into unsafe sysroot '$(INSTALL_SYSROOT)'"; \
+		exit 1; \
+	fi
+endef
+
+install-staged:
+	$(call check_install_sysroot)
+	@mkdir -p -- "$(INSTALL_SYSROOT)"
+	@echo "[INSTALL] Installing staged payloads into $(INSTALL_SYSROOT)..."
+	@for payload in ncurses/payload readline/payload bash/payload; do \
+		echo "  [INSTALL] $$payload"; \
+		( cd "$$payload" && tar -cf - . ) | ( cd "$(INSTALL_SYSROOT)" && tar -xpf - ); \
+	 done
+	@echo ""
+	@echo "  [OK] Installed staged payloads into $(INSTALL_SYSROOT)/"
 
 # ---------------------------------------------------------------------------
 # musl — clone and build musl-blueyos for i386
@@ -107,7 +154,7 @@ musl-check:
 ncurses: musl-check
 	@NCURSES_VERSION=$(NCURSES_VERSION) \
 	  MUSL_PREFIX=$(MUSL_PREFIX) \
-	  BUILD_DIR=$(BUILD_DIR) \
+	  BUILD_DIR=$(ABS_BUILD_DIR) \
 	  INSTALL_PREFIX=$(NCURSES_PREFIX) \
 	  STAGE_DIR=$(CURDIR)/ncurses/payload \
 	  CC=$(CC) \
@@ -121,7 +168,7 @@ ncurses: musl-check
 readline: ncurses
 	@READLINE_VERSION=$(READLINE_VERSION) \
 	  MUSL_PREFIX=$(MUSL_PREFIX) \
-	  BUILD_DIR=$(BUILD_DIR) \
+	  BUILD_DIR=$(ABS_BUILD_DIR) \
 	  NCURSES_PREFIX=$(NCURSES_PREFIX) \
 	  INSTALL_PREFIX=$(READLINE_PREFIX) \
 	  STAGE_DIR=$(CURDIR)/readline/payload \
@@ -134,10 +181,10 @@ readline: ncurses
 # bash — depends on ncurses and readline
 # ---------------------------------------------------------------------------
 bash: readline
-	@BASH_VERSION=$(BASH_VERSION) \
+	@BLUEYOS_BASH_VERSION=$(BASH_VERSION) \
 	  BASH_PATCH_LEVEL=$(BASH_PATCH_LEVEL) \
 	  MUSL_PREFIX=$(MUSL_PREFIX) \
-	  BUILD_DIR=$(BUILD_DIR) \
+	  BUILD_DIR=$(ABS_BUILD_DIR) \
 	  NCURSES_PREFIX=$(NCURSES_PREFIX) \
 	  READLINE_PREFIX=$(READLINE_PREFIX) \
 	  STAGE_DIR=$(CURDIR)/bash/payload \
@@ -181,6 +228,8 @@ help:
 	@echo "blueyos-bash — GNU Bash v5 + Readline + ncurses for BlueyOS"
 	@echo ""
 	@echo "  make              build ncurses → readline → bash (default)"
+	@echo "  make install      build and install payloads into a target sysroot"
+	@echo "  make install-staged copy existing payloads into a target sysroot"
 	@echo "  make musl         clone musl-blueyos and build for i386"
 	@echo "  make ncurses      build ncurses $(NCURSES_VERSION) only"
 	@echo "  make readline     build readline $(READLINE_VERSION) only"
@@ -190,12 +239,14 @@ help:
 	@echo ""
 	@echo "Variables:"
 	@echo "  MUSL_PREFIX=...        musl sysroot  (default: $(MUSL_PREFIX))"
+	@echo "  SYSROOT=...            install root  (default: $(INSTALL_SYSROOT))"
+	@echo "  DESTDIR=...            alias for SYSROOT during install"
 	@echo "  CC=...                 C compiler    (default: $(CC))"
-	@echo "  BUILD_DIR=...          output dir    (default: build)"
+	@echo "  BUILD_DIR=...          output dir    (default: $(BUILD_DIR))"
 	@echo "  NCURSES_VERSION=...    (default: $(NCURSES_VERSION))"
 	@echo "  READLINE_VERSION=...   (default: $(READLINE_VERSION))"
 	@echo "  BASH_VERSION=...       (default: $(BASH_VERSION))"
 	@echo "  BASH_PATCH_LEVEL=...   (default: $(BASH_PATCH_LEVEL))"
 	@echo ""
 	@echo "Example:"
-	@echo "  make MUSL_PREFIX=/opt/blueyos-sysroot"
+	@echo "  make install SYSROOT=/opt/blueyos-sysroot"

@@ -7,7 +7,7 @@
 #                         [--version=<x.y>] [--patches=<N>]
 #
 # Variables:
-#   BASH_VERSION      - bash base version to download (default: 5.2)
+#   BLUEYOS_BASH_VERSION - bash base version to download (default: 5.2)
 #   BASH_PATCH_LEVEL  - number of official GNU patches to apply (default: 21)
 #   MUSL_PREFIX       - path to musl-blueyos sysroot
 #   NCURSES_PREFIX    - path to ncurses build prefix (default: build/ncurses-install)
@@ -21,22 +21,64 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-BASH_VERSION="${BASH_VERSION:-5.2}"
+BASH_BASE_VERSION="${BLUEYOS_BASH_VERSION:-5.2}"
 BASH_PATCH_LEVEL="${BASH_PATCH_LEVEL:-21}"
 # SHA256 of the official bash-5.2.tar.gz from https://ftp.gnu.org/gnu/bash/
-BASH_SHA256="${BASH_SHA256:-a139c166df7ff4471c5e0733051642ee5556bd7d7dcdcc0e9f80b22d6a7a3c5a}"
+BASH_SHA256="${BASH_SHA256:-a139c166df7ff4471c5e0733051642ee5556c1cc8a4a78f145583c5c81ab32fb}"
 MUSL_PREFIX="${MUSL_PREFIX:-${REPO_DIR}/build/musl}"
 BUILD_DIR="${BUILD_DIR:-${REPO_DIR}/build}"
 NCURSES_PREFIX="${NCURSES_PREFIX:-${BUILD_DIR}/ncurses-install}"
 READLINE_PREFIX="${READLINE_PREFIX:-${BUILD_DIR}/readline-install}"
 STAGE_DIR="${STAGE_DIR:-${REPO_DIR}/bash/payload}"
 
+abspath() {
+  case "$1" in
+    /*) printf '%s\n' "$1" ;;
+    *) printf '%s/%s\n' "${REPO_DIR}" "$1" ;;
+  esac
+}
+
+patch_bash_configure() {
+  local configure_path
+  configure_path="$1/configure"
+
+  if [ ! -f "${configure_path}" ]; then
+    return 0
+  fi
+
+  # Bash 5.2's generated configure script adds the strtoimax replacement when
+  # the system implementation is usable, which collides with musl's libc.
+  sed -i 's/if test \$bash_cv_func_strtoimax = yes; then/if test \$bash_cv_func_strtoimax = no; then/' "${configure_path}"
+}
+
+ensure_configure_script() {
+  local src_dir configure_path
+  src_dir="$1"
+  configure_path="${src_dir}/configure"
+
+  if [ -x "${configure_path}" ]; then
+    return 0
+  fi
+
+  if command -v autoreconf >/dev/null 2>&1 && \
+     { [ -f "${src_dir}/configure.ac" ] || [ -f "${src_dir}/configure.in" ]; }; then
+    echo "[BASH] configure missing; regenerating with autoreconf..."
+    (cd "${src_dir}" && autoreconf -fi)
+  fi
+
+  if [ ! -x "${configure_path}" ]; then
+    echo "[BASH] Missing ${configure_path}" >&2
+    echo "       Remove ${src_dir} and retry. If this is a checkout, install autotools first." >&2
+    exit 1
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --version=*)  BASH_VERSION="${1#*=}";      shift ;;
+    --version=*)  BASH_BASE_VERSION="${1#*=}"; shift ;;
     --patches=*)  BASH_PATCH_LEVEL="${1#*=}";  shift ;;
     --musl=*)     MUSL_PREFIX="${1#*=}";       shift ;;
     --ncurses=*)  NCURSES_PREFIX="${1#*=}";    shift ;;
@@ -50,6 +92,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+BUILD_DIR="$(abspath "${BUILD_DIR}")"
+NCURSES_PREFIX="$(abspath "${NCURSES_PREFIX}")"
+READLINE_PREFIX="$(abspath "${READLINE_PREFIX}")"
+STAGE_DIR="$(abspath "${STAGE_DIR}")"
+MUSL_PREFIX="$(BLUEYOS_SYSROOT="${BLUEYOS_SYSROOT:-/opt/blueyos-sysroot}" BUILD_DIR="${BUILD_DIR}" bash "${SCRIPT_DIR}/resolve-musl-prefix.sh" "${MUSL_PREFIX}")"
+
 MUSL_INCLUDE="${MUSL_PREFIX}/include"
 MUSL_LIB="${MUSL_PREFIX}/lib"
 NCURSES_INCLUDE="${NCURSES_PREFIX}/include"
@@ -58,7 +106,7 @@ READLINE_INCLUDE="${READLINE_PREFIX}/include"
 READLINE_LIB="${READLINE_PREFIX}/lib"
 
 # Short version tag used in GNU patch filenames: "5.2" → "52"
-BASH_SHORT="${BASH_VERSION//./}"
+BASH_SHORT="${BASH_BASE_VERSION//./}"
 
 # ---------------------------------------------------------------------------
 # Validate prerequisites
@@ -90,10 +138,10 @@ fi
 # ---------------------------------------------------------------------------
 # Download base tarball
 # ---------------------------------------------------------------------------
-TARBALL="bash-${BASH_VERSION}.tar.gz"
+TARBALL="bash-${BASH_BASE_VERSION}.tar.gz"
 TARBALL_URL="https://ftp.gnu.org/gnu/bash/${TARBALL}"
 DOWNLOAD_DIR="${BUILD_DIR}/downloads"
-SRC_DIR="${BUILD_DIR}/bash-${BASH_VERSION}"
+SRC_DIR="${BUILD_DIR}/bash-${BASH_BASE_VERSION}"
 
 mkdir -p "${DOWNLOAD_DIR}" "${BUILD_DIR}"
 
@@ -110,10 +158,13 @@ if [ ! -d "${SRC_DIR}" ]; then
   tar -C "${BUILD_DIR}" -xzf "${DOWNLOAD_DIR}/${TARBALL}"
 fi
 
+ensure_configure_script "${SRC_DIR}"
+patch_bash_configure "${SRC_DIR}"
+
 # ---------------------------------------------------------------------------
 # Apply GNU official patches (bash52-001 … bash52-NNN)
 # ---------------------------------------------------------------------------
-PATCH_DIR="${DOWNLOAD_DIR}/bash-${BASH_VERSION}-patches"
+PATCH_DIR="${DOWNLOAD_DIR}/bash-${BASH_BASE_VERSION}-patches"
 mkdir -p "${PATCH_DIR}"
 
 if [ "${BASH_PATCH_LEVEL}" -gt 0 ]; then
@@ -122,7 +173,7 @@ if [ "${BASH_PATCH_LEVEL}" -gt 0 ]; then
     PATCH_NAME="$(printf "bash%s-%03d" "${BASH_SHORT}" "${i}")"
     PATCH_FILE="${PATCH_DIR}/${PATCH_NAME}"
     if [ ! -f "${PATCH_FILE}" ]; then
-      PATCH_URL="https://ftp.gnu.org/gnu/bash/bash-${BASH_VERSION}-patches/${PATCH_NAME}"
+      PATCH_URL="https://ftp.gnu.org/gnu/bash/bash-${BASH_BASE_VERSION}-patches/${PATCH_NAME}"
       echo "  Fetching patch ${PATCH_NAME}..."
       curl -fSL --retry 3 -o "${PATCH_FILE}" "${PATCH_URL}"
     fi
@@ -151,7 +202,17 @@ if [ -z "${CC:-}" ]; then
   fi
 fi
 
-echo "[BASH] Configuring bash ${BASH_VERSION}.${BASH_PATCH_LEVEL} for i386/musl..."
+if [ "${CC##*/}" = "musl-gcc" ] && [ -z "${REALGCC:-}" ]; then
+  REALGCC="gcc"
+  export REALGCC
+fi
+
+EXTRA_LDFLAGS=""
+if [ "${CC##*/}" = "musl-gcc" ]; then
+  EXTRA_LDFLAGS=" -Wl,-m,elf_i386"
+fi
+
+echo "[BASH] Configuring bash ${BASH_BASE_VERSION}.${BASH_PATCH_LEVEL} for i386/musl..."
 "${SRC_DIR}/configure" \
   --prefix=/usr \
   --bindir=/bin \
@@ -176,7 +237,7 @@ echo "[BASH] Configuring bash ${BASH_VERSION}.${BASH_PATCH_LEVEL} for i386/musl.
   LDFLAGS="-m32 -static \
     -L${MUSL_LIB} \
     -L${READLINE_LIB} \
-    -L${NCURSES_LIB}" \
+    -L${NCURSES_LIB}${EXTRA_LDFLAGS}" \
   LIBS="-lreadline -lncursesw"
 
 # ---------------------------------------------------------------------------
